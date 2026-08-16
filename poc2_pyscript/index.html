@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Skeleton Game - POC 2</title>
+    <!-- Load PyScript -->
+    <link rel="stylesheet" href="https://pyscript.net/releases/2023.11.1/core.css" />
+    <script type="module" src="https://pyscript.net/releases/2023.11.1/core.js"></script>
+    <style>
+        body {
+            background-color: #222;
+            color: white;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            font-family: sans-serif;
+            margin-top: 50px;
+        }
+        canvas {
+            border: 2px solid #555;
+            background-color: #323232;
+        }
+        #loading {
+            margin-bottom: 20px;
+            font-size: 1.2em;
+        }
+    </style>
+</head>
+<body>
+    <h1>Skeleton Game - PyScript POC</h1>
+    <div id="loading">Loading Python Engine...</div>
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+
+    <!-- Python Engine -->
+    <script type="py" config='{"packages":["asyncio"]}'>
+        import asyncio
+        from js import document, window, Image, console
+        from pyodide.ffi import create_proxy
+
+        # Setup Canvas
+        canvas = document.getElementById("gameCanvas")
+        ctx = canvas.getContext("2d")
+        WIDTH = canvas.width
+        HEIGHT = canvas.height
+
+        # Load Sprite
+        sprite_loaded = False
+        sprite_image = Image.new()
+        sprite_image.src = "../assets/skeleton.jpg"
+        
+        def on_image_load(event):
+            global sprite_loaded
+            sprite_loaded = True
+            document.getElementById("loading").innerText = "Game Running! Use Arrow Keys to move."
+            
+        sprite_image.onload = on_image_load
+
+        # Input tracking
+        keys = {
+            "ArrowLeft": False,
+            "ArrowRight": False,
+            "ArrowUp": False,
+            "ArrowDown": False
+        }
+
+        def keydown(event):
+            if event.code in keys:
+                keys[event.code] = True
+                event.preventDefault() # Prevent browser from scrolling
+
+        def keyup(event):
+            if event.code in keys:
+                keys[event.code] = False
+                event.preventDefault()
+
+        # Bind keyboard events
+        window.addEventListener("keydown", create_proxy(keydown))
+        window.addEventListener("keyup", create_proxy(keyup))
+
+        # Helper function for AABB (Axis-Aligned Bounding Box) collision
+        def rect_intersect(r1, r2):
+            return not (r2["x"] >= r1["x"] + r1["w"] or 
+                        r2["x"] + r2["w"] <= r1["x"] or 
+                        r2["y"] >= r1["y"] + r1["h"] or 
+                        r2["y"] + r2["h"] <= r1["y"])
+
+        class Skeleton:
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+                self.w = 64
+                self.h = 64
+                self.speed = 300 # pixels per second
+
+            def get_rect(self):
+                return {"x": self.x, "y": self.y, "w": self.w, "h": self.h}
+
+            def update(self, dt, obstacles):
+                dx = 0
+                dy = 0
+                if keys["ArrowLeft"]:
+                    dx -= self.speed * dt
+                if keys["ArrowRight"]:
+                    dx += self.speed * dt
+                if keys["ArrowUp"]:
+                    dy -= self.speed * dt
+                if keys["ArrowDown"]:
+                    dy += self.speed * dt
+
+                # Apply X movement and resolve collisions
+                self.x += dx
+                rect = self.get_rect()
+                for obs in obstacles:
+                    if rect_intersect(rect, obs):
+                        if dx > 0: # moving right
+                            self.x = obs["x"] - self.w
+                        elif dx < 0: # moving left
+                            self.x = obs["x"] + obs["w"]
+
+                # Apply Y movement and resolve collisions
+                self.y += dy
+                rect = self.get_rect()
+                for obs in obstacles:
+                    if rect_intersect(rect, obs):
+                        if dy > 0: # moving down
+                            self.y = obs["y"] - self.h
+                        elif dy < 0: # moving up
+                            self.y = obs["y"] + obs["h"]
+
+            def draw(self, ctx):
+                if sprite_loaded:
+                    ctx.drawImage(sprite_image, self.x, self.y, self.w, self.h)
+                else:
+                    ctx.fillStyle = "red"
+                    ctx.fillRect(self.x, self.y, self.w, self.h)
+
+        # Static obstacles for collision testing
+        obstacles = [
+            {"x": 200, "y": 200, "w": 100, "h": 100},
+            {"x": 500, "y": 300, "w": 50, "h": 200},
+            {"x": 300, "y": 450, "w": 200, "h": 50}
+        ]
+
+        player = Skeleton(WIDTH / 2, HEIGHT / 2)
+
+        async def main():
+            last_time = window.performance.now()
+            
+            while True:
+                # Calculate delta time (dt) in seconds
+                current_time = window.performance.now()
+                dt = (current_time - last_time) / 1000.0
+                last_time = current_time
+
+                # Cap dt to avoid large jumps if tab is inactive
+                if dt > 0.1:
+                    dt = 0.1
+                
+                # Update game state
+                player.update(dt, obstacles)
+
+                # Clear screen
+                ctx.fillStyle = "#323232"
+                ctx.fillRect(0, 0, WIDTH, HEIGHT)
+
+                # Draw obstacles
+                for obs in obstacles:
+                    ctx.fillStyle = "#646464"
+                    ctx.fillRect(obs["x"], obs["y"], obs["w"], obs["h"])
+                    ctx.strokeStyle = "#C8C8C8"
+                    ctx.lineWidth = 2
+                    ctx.strokeRect(obs["x"], obs["y"], obs["w"], obs["h"])
+
+                # Draw player
+                player.draw(ctx)
+
+                # Yield to the browser (effectively a ~60 FPS sleep)
+                await asyncio.sleep(1/60)
+
+        # Start the asynchronous game loop
+        asyncio.ensure_future(main())
+    </script>
+</body>
+</html>
