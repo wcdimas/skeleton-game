@@ -3,182 +3,568 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Skeleton Game - POC 2</title>
+    <title>Skeleton Game - Stage 2</title>
     <!-- Load PyScript -->
     <link rel="stylesheet" href="https://pyscript.net/releases/2023.11.1/core.css" />
     <script type="module" src="https://pyscript.net/releases/2023.11.1/core.js"></script>
     <style>
         body {
-            background-color: #222;
+            background-color: #111;
             color: white;
             display: flex;
             flex-direction: column;
             align-items: center;
             font-family: sans-serif;
-            margin-top: 50px;
+            margin-top: 30px;
         }
         canvas {
-            border: 2px solid #555;
-            background-color: #323232;
+            border: 4px solid #444;
+            background-color: #1a1a1a;
+            box-shadow: 0 0 20px rgba(0,0,0,0.8);
         }
         #loading {
             margin-bottom: 20px;
             font-size: 1.2em;
         }
+        .instructions {
+            margin-top: 15px;
+            color: #aaa;
+        }
+        kbd {
+            background: #333;
+            padding: 3px 6px;
+            border-radius: 4px;
+            border: 1px solid #555;
+        }
     </style>
 </head>
 <body>
-    <h1>Skeleton Game - PyScript POC</h1>
-    <div id="loading">Loading Python Engine...</div>
+    <h1>Skeleton Game - Stage 2 Engine</h1>
+    <div id="loading">Loading Engine & Procedural Assets...</div>
     <canvas id="gameCanvas" width="800" height="600"></canvas>
+    
+    <div class="instructions">
+        <strong>Controls:</strong> <kbd>Arrow Keys</kbd> Move | <kbd>Space</kbd> Sword Attack
+    </div>
 
     <!-- Python Engine -->
     <script type="py" config='{"packages":["asyncio"]}'>
         import asyncio
-        from js import document, window, Image, console
+        import math
+        import random
+        from js import document, window
         from pyodide.ffi import create_proxy
+
+        document.getElementById("loading").innerText = "Game Running!"
 
         # Setup Canvas
         canvas = document.getElementById("gameCanvas")
         ctx = canvas.getContext("2d")
         WIDTH = canvas.width
         HEIGHT = canvas.height
-
-        # Load Sprite
-        sprite_loaded = False
-        sprite_image = Image.new()
-        sprite_image.src = "../assets/skeleton.jpg"
-        
-        def on_image_load(event):
-            global sprite_loaded
-            sprite_loaded = True
-            document.getElementById("loading").innerText = "Game Running! Use Arrow Keys to move."
-            
-        sprite_image.onload = on_image_load
+        MAP_WIDTH = 2500
+        MAP_HEIGHT = 2500
 
         # Input tracking
-        keys = {
-            "ArrowLeft": False,
-            "ArrowRight": False,
-            "ArrowUp": False,
-            "ArrowDown": False
-        }
+        keys = { "ArrowLeft": False, "ArrowRight": False, "ArrowUp": False, "ArrowDown": False, "Space": False }
 
         def keydown(event):
             if event.code in keys:
                 keys[event.code] = True
-                event.preventDefault() # Prevent browser from scrolling
+                event.preventDefault()
 
         def keyup(event):
             if event.code in keys:
                 keys[event.code] = False
                 event.preventDefault()
 
-        # Bind keyboard events
         window.addEventListener("keydown", create_proxy(keydown))
         window.addEventListener("keyup", create_proxy(keyup))
 
-        # Helper function for AABB (Axis-Aligned Bounding Box) collision
+        # Math utilities
         def rect_intersect(r1, r2):
-            return not (r2["x"] >= r1["x"] + r1["w"] or 
-                        r2["x"] + r2["w"] <= r1["x"] or 
-                        r2["y"] >= r1["y"] + r1["h"] or 
-                        r2["y"] + r2["h"] <= r1["y"])
+            return not (r2["x"] >= r1["x"] + r1["w"] or r2["x"] + r2["w"] <= r1["x"] or r2["y"] >= r1["y"] + r1["h"] or r2["y"] + r2["h"] <= r1["y"])
 
-        class Skeleton:
+        def distance(x1, y1, x2, y2):
+            return math.sqrt((x2 - x1)**2 + (y2 - y1)**2)
+
+        # Global Engine Manager
+        class Engine:
+            def __init__(self):
+                self.enemies = []
+                self.projectiles = []
+                self.hitboxes = []
+                self.camera_x = 0
+                self.camera_y = 0
+
+        engine = Engine()
+
+        # Camera System
+        def update_camera(target_x, target_y):
+            # Center camera on target
+            engine.camera_x = target_x - WIDTH / 2
+            engine.camera_y = target_y - HEIGHT / 2
+            # Clamp camera to map bounds
+            engine.camera_x = max(0, min(engine.camera_x, MAP_WIDTH - WIDTH))
+            engine.camera_y = max(0, min(engine.camera_y, MAP_HEIGHT - HEIGHT))
+
+        # Core Health System Component
+        class HealthSystem:
+            def __init__(self, max_hp):
+                self.max_hp = max_hp
+                self.hp = max_hp
+                self.invulnerable_timer = 0
+                self.dead = False
+                
+            def take_damage(self, amount):
+                if self.invulnerable_timer <= 0 and not self.dead:
+                    self.hp -= amount
+                    self.invulnerable_timer = 0.5 # 0.5s i-frames
+                    if self.hp <= 0:
+                        self.dead = True
+                        
+            def update(self, dt):
+                if self.invulnerable_timer > 0:
+                    self.invulnerable_timer -= dt
+
+        # Procedural Graphics Functions
+        def draw_skeleton(ctx, x, y, facing_left):
+            ctx.save()
+            ctx.translate(x, y)
+            if facing_left:
+                ctx.scale(-1, 1)
+                ctx.translate(-40, 0)
+            
+            # Skull
+            ctx.fillStyle = "#e0e0e0"
+            ctx.beginPath()
+            ctx.arc(20, 10, 12, 0, math.pi * 2)
+            ctx.fill()
+            # Jaw
+            ctx.fillRect(14, 18, 12, 6)
+            
+            # Eyes & Nose
+            ctx.fillStyle = "#111"
+            ctx.fillRect(12, 6, 6, 6)
+            ctx.fillRect(22, 6, 6, 6)
+            ctx.fillRect(18, 14, 4, 3)
+            
+            # Spine and Ribs
+            ctx.strokeStyle = "#e0e0e0"
+            ctx.lineWidth = 4
+            ctx.lineCap = "round"
+            ctx.beginPath()
+            ctx.moveTo(20, 24)
+            ctx.lineTo(20, 45) # Spine
+            
+            # Ribs
+            for ry in [28, 34, 40]:
+                ctx.moveTo(10, ry)
+                ctx.lineTo(30, ry)
+                
+            # Arms
+            ctx.moveTo(20, 26)
+            ctx.lineTo(5, 35) # Left arm
+            ctx.moveTo(20, 26)
+            ctx.lineTo(35, 35) # Right arm
+            
+            # Legs
+            ctx.moveTo(20, 45)
+            ctx.lineTo(8, 60) # Left leg
+            ctx.moveTo(20, 45)
+            ctx.lineTo(32, 60) # Right leg
+            ctx.stroke()
+            ctx.restore()
+
+        def draw_wizard(ctx, x, y, facing_left):
+            ctx.save()
+            ctx.translate(x, y)
+            if facing_left:
+                ctx.scale(-1, 1)
+                ctx.translate(-40, 0)
+            
+            # Cloak
+            ctx.fillStyle = "#4a148c"
+            ctx.beginPath()
+            ctx.moveTo(20, 15)
+            ctx.lineTo(0, 60)
+            ctx.lineTo(40, 60)
+            ctx.fill()
+            
+            # Hat brim
+            ctx.fillStyle = "#311b92"
+            ctx.fillRect(-5, 10, 50, 6)
+            # Hat cone
+            ctx.beginPath()
+            ctx.moveTo(0, 10)
+            ctx.lineTo(40, 10)
+            ctx.lineTo(15, -20)
+            ctx.fill()
+            
+            # Eyes glowing from shadows
+            ctx.fillStyle = "#00e5ff"
+            ctx.fillRect(14, 20, 4, 4)
+            ctx.fillRect(22, 20, 4, 4)
+            
+            # Staff
+            ctx.strokeStyle = "#5d4037"
+            ctx.lineWidth = 4
+            ctx.beginPath()
+            ctx.moveTo(35, 15)
+            ctx.lineTo(35, 60)
+            ctx.stroke()
+            
+            # Staff Gem
+            ctx.fillStyle = "#00e5ff"
+            ctx.beginPath()
+            ctx.arc(35, 12, 6, 0, math.pi*2)
+            ctx.fill()
+            # Gem glow
+            ctx.fillStyle = "rgba(0, 229, 255, 0.4)"
+            ctx.beginPath()
+            ctx.arc(35, 12, 12, 0, math.pi*2)
+            ctx.fill()
+            
+            ctx.restore()
+
+        # Entities
+        class Projectile:
+            def __init__(self, x, y, target_x, target_y, speed, damage):
+                self.x = x
+                self.y = y
+                self.w = 12
+                self.h = 12
+                self.speed = speed
+                self.damage = damage
+                self.dead = False
+                
+                # Math for velocity based on direction vector
+                dist = distance(x, y, target_x, target_y)
+                if dist == 0: dist = 1
+                self.vx = ((target_x - x) / dist) * speed
+                self.vy = ((target_y - y) / dist) * speed
+                
+            def update(self, dt):
+                self.x += self.vx * dt
+                self.y += self.vy * dt
+                # Die if out of bounds
+                if self.x < 0 or self.x > MAP_WIDTH or self.y < 0 or self.y > MAP_HEIGHT:
+                    self.dead = True
+                    
+            def get_rect(self):
+                return {"x": self.x, "y": self.y, "w": self.w, "h": self.h}
+                
+            def draw(self, ctx):
+                ctx.fillStyle = "#00e5ff"
+                ctx.beginPath()
+                ctx.arc(self.x - engine.camera_x + self.w/2, self.y - engine.camera_y + self.h/2, self.w/2, 0, math.pi*2)
+                ctx.fill()
+
+        class Hitbox:
+            def __init__(self, x, y, w, h, damage, duration):
+                self.x = x
+                self.y = y
+                self.w = w
+                self.h = h
+                self.damage = damage
+                self.duration = duration
+                self.initial_duration = duration
+                self.dead = False
+                
+            def update(self, dt):
+                self.duration -= dt
+                if self.duration <= 0:
+                    self.dead = True
+                    
+            def get_rect(self):
+                return {"x": self.x, "y": self.y, "w": self.w, "h": self.h}
+                
+            def draw(self, ctx):
+                # Draw a sword slash effect that fades out
+                alpha = self.duration / self.initial_duration
+                ctx.fillStyle = f"rgba(255, 255, 255, {alpha})"
+                ctx.beginPath()
+                ctx.arc(self.x - engine.camera_x + self.w/2, self.y - engine.camera_y + self.h/2, self.w/2, 0, math.pi)
+                ctx.fill()
+
+        class SkeletonPlayer:
             def __init__(self, x, y):
                 self.x = x
                 self.y = y
-                self.w = 64
-                self.h = 64
-                self.speed = 300 # pixels per second
-
+                self.w = 40
+                self.h = 60
+                self.speed = 300
+                self.health = HealthSystem(100)
+                self.facing_left = False
+                self.attack_cooldown = 0
+                
             def get_rect(self):
                 return {"x": self.x, "y": self.y, "w": self.w, "h": self.h}
-
-            def update(self, dt, obstacles):
+                
+            def update(self, dt):
+                if self.health.dead: return
+                self.health.update(dt)
+                
                 dx = 0
                 dy = 0
-                if keys["ArrowLeft"]:
+                if keys["ArrowLeft"]: 
                     dx -= self.speed * dt
-                if keys["ArrowRight"]:
+                    self.facing_left = True
+                if keys["ArrowRight"]: 
                     dx += self.speed * dt
-                if keys["ArrowUp"]:
-                    dy -= self.speed * dt
-                if keys["ArrowDown"]:
-                    dy += self.speed * dt
-
-                # Apply X movement and resolve collisions
+                    self.facing_left = False
+                if keys["ArrowUp"]: dy -= self.speed * dt
+                if keys["ArrowDown"]: dy += self.speed * dt
+                
                 self.x += dx
-                rect = self.get_rect()
-                for obs in obstacles:
-                    if rect_intersect(rect, obs):
-                        if dx > 0: # moving right
-                            self.x = obs["x"] - self.w
-                        elif dx < 0: # moving left
-                            self.x = obs["x"] + obs["w"]
-
-                # Apply Y movement and resolve collisions
                 self.y += dy
-                rect = self.get_rect()
-                for obs in obstacles:
-                    if rect_intersect(rect, obs):
-                        if dy > 0: # moving down
-                            self.y = obs["y"] - self.h
-                        elif dy < 0: # moving up
-                            self.y = obs["y"] + obs["h"]
+                
+                # Clamp to map bounds
+                self.x = max(0, min(self.x, MAP_WIDTH - self.w))
+                self.y = max(0, min(self.y, MAP_HEIGHT - self.h))
+                
+                # Sword Combat
+                if self.attack_cooldown > 0:
+                    self.attack_cooldown -= dt
+                    
+                if keys["Space"] and self.attack_cooldown <= 0:
+                    self.attack()
+                    
+            def attack(self):
+                self.attack_cooldown = 0.4
+                # Spawn a hitbox in the direction player is facing
+                hx = self.x - 40 if self.facing_left else self.x + self.w
+                hy = self.y + 10
+                engine.hitboxes.append(Hitbox(hx, hy, 40, 40, 30, 0.15)) # 30 damage
+                
+            def draw(self, ctx):
+                if self.health.dead: return
+                # Blink if invulnerable
+                if self.health.invulnerable_timer > 0 and (int(window.performance.now() / 100) % 2 == 0):
+                    return 
+                    
+                draw_skeleton(ctx, self.x - engine.camera_x, self.y - engine.camera_y, self.facing_left)
+                
+                # Draw Player Healthbar UI (fixed to screen)
+                ctx.fillStyle = "#333"
+                ctx.fillRect(20, 20, 200, 20)
+                ctx.fillStyle = "#d32f2f"
+                ctx.fillRect(20, 20, 200 * (self.health.hp / self.health.max_hp), 20)
+                ctx.strokeStyle = "#fff"
+                ctx.strokeRect(20, 20, 200, 20)
+
+        class WizardEnemy:
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+                self.w = 40
+                self.h = 60
+                self.speed = 120
+                self.health = HealthSystem(60)
+                self.state = "WANDER"
+                self.facing_left = False
+                
+                # AI state variables
+                self.state_timer = 0
+                self.target_x = x
+                self.target_y = y
+                self.attack_timer = 0
+                
+            def get_rect(self):
+                return {"x": self.x, "y": self.y, "w": self.w, "h": self.h}
+                
+            def update(self, dt, player):
+                if self.health.dead: return
+                self.health.update(dt)
+                
+                dist_to_player = distance(self.x, self.y, player.x, player.y)
+                
+                if self.attack_timer > 0: 
+                    self.attack_timer -= dt
+                
+                # AI State Machine Decision Logic
+                if dist_to_player < 200:
+                    self.state = "FLEE" # Too close, create distance
+                elif dist_to_player < 400 and self.attack_timer <= 0:
+                    self.state = "ATTACK" # Good distance, shoot!
+                elif dist_to_player < 600:
+                    self.state = "CHASE" # Player seen, pursue!
+                else:
+                    self.state = "WANDER" # Nothing going on
+                    
+                # AI Action Execution
+                if self.state == "WANDER":
+                    self.state_timer -= dt
+                    if self.state_timer <= 0:
+                        self.target_x = self.x + random.randint(-150, 150)
+                        self.target_y = self.y + random.randint(-150, 150)
+                        self.state_timer = random.uniform(1.5, 3.5)
+                    self.move_towards(self.target_x, self.target_y, dt)
+                    
+                elif self.state == "CHASE":
+                    self.move_towards(player.x, player.y, dt)
+                    
+                elif self.state == "FLEE":
+                    # Move exactly opposite to the player's vector
+                    tx = self.x + (self.x - player.x)
+                    ty = self.y + (self.y - player.y)
+                    self.move_towards(tx, ty, dt)
+                    
+                elif self.state == "ATTACK":
+                    if self.attack_timer <= 0:
+                        # Shoot lightning projectile from staff to player center
+                        px = self.x - 5 if self.facing_left else self.x + 35
+                        engine.projectiles.append(Projectile(px, self.y + 12, player.x + 20, player.y + 30, 400, 20))
+                        self.attack_timer = 1.5 # Cooldown before next shot
+                        self.facing_left = player.x < self.x
+                        
+                # Clamp to map bounds
+                self.x = max(0, min(self.x, MAP_WIDTH - self.w))
+                self.y = max(0, min(self.y, MAP_HEIGHT - self.h))
+                        
+            def move_towards(self, tx, ty, dt):
+                dist = distance(self.x, self.y, tx, ty)
+                if dist > 5:
+                    self.x += ((tx - self.x) / dist) * self.speed * dt
+                    self.y += ((ty - self.y) / dist) * self.speed * dt
+                    # Turn around depending on movement direction
+                    self.facing_left = tx < self.x
 
             def draw(self, ctx):
-                if sprite_loaded:
-                    ctx.drawImage(sprite_image, self.x, self.y, self.w, self.h)
-                else:
-                    ctx.fillStyle = "red"
-                    ctx.fillRect(self.x, self.y, self.w, self.h)
+                if self.health.dead: return
+                if self.health.invulnerable_timer > 0 and (int(window.performance.now() / 100) % 2 == 0):
+                    return 
+                    
+                draw_wizard(ctx, self.x - engine.camera_x, self.y - engine.camera_y, self.facing_left)
+                
+                # Floating Healthbar
+                ctx.fillStyle = "#333"
+                ctx.fillRect(self.x - engine.camera_x, self.y - 12 - engine.camera_y, self.w, 6)
+                ctx.fillStyle = "#4caf50"
+                ctx.fillRect(self.x - engine.camera_x, self.y - 12 - engine.camera_y, self.w * (self.health.hp / self.health.max_hp), 6)
 
-        # Static obstacles for collision testing
-        obstacles = [
-            {"x": 200, "y": 200, "w": 100, "h": 100},
-            {"x": 500, "y": 300, "w": 50, "h": 200},
-            {"x": 300, "y": 450, "w": 200, "h": 50}
-        ]
 
-        player = Skeleton(WIDTH / 2, HEIGHT / 2)
+        # Initialization
+        player = SkeletonPlayer(MAP_WIDTH / 2, MAP_HEIGHT / 2)
 
+        # Spawn initial batch of wizards
+        MAX_ENEMIES = 15
+        for _ in range(MAX_ENEMIES):
+            engine.enemies.append(WizardEnemy(random.randint(0, MAP_WIDTH), random.randint(0, MAP_HEIGHT)))
+
+        # Game Loop Process
         async def main():
             last_time = window.performance.now()
+            respawn_timer = 3.0
             
             while True:
-                # Calculate delta time (dt) in seconds
                 current_time = window.performance.now()
                 dt = (current_time - last_time) / 1000.0
                 last_time = current_time
-
-                # Cap dt to avoid large jumps if tab is inactive
-                if dt > 0.1:
-                    dt = 0.1
+                if dt > 0.1: dt = 0.1 # prevent huge spikes if tab was hidden
                 
-                # Update game state
-                player.update(dt, obstacles)
+                # === 1. UPDATE LOGIC ===
+                player.update(dt)
+                update_camera(player.x, player.y)
+                
+                # Player Hitboxes vs Enemies
+                for h in engine.hitboxes[:]:
+                    h.update(dt)
+                    if h.dead:
+                        engine.hitboxes.remove(h)
+                        continue
+                    h_rect = h.get_rect()
+                    for e in engine.enemies:
+                        if not e.health.dead and rect_intersect(h_rect, e.get_rect()):
+                            e.health.take_damage(h.damage)
+                            h.dead = True # A slash hits an enemy once
+                            break
+                
+                # Projectiles vs Player
+                p_rect = player.get_rect()
+                for p in engine.projectiles[:]:
+                    p.update(dt)
+                    if p.dead:
+                        engine.projectiles.remove(p)
+                        continue
+                    if rect_intersect(p.get_rect(), p_rect):
+                        player.health.take_damage(p.damage)
+                        p.dead = True
+                        
+                # Update Enemies
+                alive_enemies = 0
+                for e in engine.enemies:
+                    e.update(dt, player)
+                    if not e.health.dead:
+                        alive_enemies += 1
+                        
+                # Respawn Manager Engine
+                if alive_enemies < MAX_ENEMIES:
+                    respawn_timer -= dt
+                    if respawn_timer <= 0:
+                        # Spawn out of player's sight
+                        angle = random.uniform(0, math.pi * 2)
+                        dist = random.uniform(800, 1200) # Far away
+                        ex = player.x + math.cos(angle) * dist
+                        ey = player.y + math.sin(angle) * dist
+                        # Keep inside map
+                        if 0 <= ex <= MAP_WIDTH and 0 <= ey <= MAP_HEIGHT:
+                            engine.enemies.append(WizardEnemy(ex, ey))
+                        respawn_timer = 2.0
 
-                # Clear screen
-                ctx.fillStyle = "#323232"
+                # Garbage collection for dead enemies
+                engine.enemies = [e for e in engine.enemies if not e.health.dead]
+
+                # === 2. DRAW RENDERING ===
+                
+                # Background Fill
+                ctx.fillStyle = "#1a1a1a"
                 ctx.fillRect(0, 0, WIDTH, HEIGHT)
+                
+                # Map Grid (creates illusion of movement)
+                ctx.strokeStyle = "#2a2a2a"
+                ctx.lineWidth = 2
+                start_x = - (engine.camera_x % 100)
+                start_y = - (engine.camera_y % 100)
+                
+                for i in range(int(WIDTH/100) + 2):
+                    ctx.beginPath()
+                    ctx.moveTo(start_x + i*100, 0)
+                    ctx.lineTo(start_x + i*100, HEIGHT)
+                    ctx.stroke()
+                    
+                for i in range(int(HEIGHT/100) + 2):
+                    ctx.beginPath()
+                    ctx.moveTo(0, start_y + i*100)
+                    ctx.lineTo(WIDTH, start_y + i*100)
+                    ctx.stroke()
 
-                # Draw obstacles
-                for obs in obstacles:
-                    ctx.fillStyle = "#646464"
-                    ctx.fillRect(obs["x"], obs["y"], obs["w"], obs["h"])
-                    ctx.strokeStyle = "#C8C8C8"
-                    ctx.lineWidth = 2
-                    ctx.strokeRect(obs["x"], obs["y"], obs["w"], obs["h"])
+                # Map boundaries (Red line around the entire world)
+                ctx.strokeStyle = "#ff0000"
+                ctx.lineWidth = 10
+                ctx.strokeRect(-engine.camera_x, -engine.camera_y, MAP_WIDTH, MAP_HEIGHT)
 
-                # Draw player
+                # Draw entities in z-order
+                for e in engine.enemies: e.draw(ctx)
+                for p in engine.projectiles: p.draw(ctx)
+                for h in engine.hitboxes: h.draw(ctx)
                 player.draw(ctx)
+                
+                # Draw Death Screen overlay
+                if player.health.dead:
+                    ctx.fillStyle = "rgba(0, 0, 0, 0.7)"
+                    ctx.fillRect(0, 0, WIDTH, HEIGHT)
+                    ctx.fillStyle = "#ff0000"
+                    ctx.font = "bold 60px sans-serif"
+                    ctx.textAlign = "center"
+                    ctx.fillText("YOU DIED", WIDTH/2, HEIGHT/2)
+                    ctx.font = "20px sans-serif"
+                    ctx.fillStyle = "#fff"
+                    ctx.fillText("Refresh the page to restart.", WIDTH/2, HEIGHT/2 + 40)
 
-                # Yield to the browser (effectively a ~60 FPS sleep)
                 await asyncio.sleep(1/60)
 
-        # Start the asynchronous game loop
+        # Start game loop
         asyncio.ensure_future(main())
     </script>
 </body>
