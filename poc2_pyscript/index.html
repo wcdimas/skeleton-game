@@ -94,6 +94,7 @@
                 self.enemies = []
                 self.projectiles = []
                 self.hitboxes = []
+                self.walls = []
                 self.camera_x = 0
                 self.camera_y = 0
 
@@ -227,15 +228,124 @@
             
             ctx.restore()
 
+        def draw_orc(ctx, x, y, facing_left):
+            ctx.save()
+            ctx.translate(x, y)
+            if facing_left:
+                ctx.scale(-1, 1)
+                ctx.translate(-40, 0)
+            
+            # Body
+            ctx.fillStyle = "#2e7d32" # dark green
+            ctx.fillRect(10, 20, 20, 30)
+            
+            # Head
+            ctx.fillStyle = "#388e3c"
+            ctx.beginPath()
+            ctx.arc(20, 10, 12, 0, math.pi*2)
+            ctx.fill()
+            
+            # Eyes
+            ctx.fillStyle = "#ff0000"
+            ctx.fillRect(14, 6, 4, 4)
+            ctx.fillRect(22, 6, 4, 4)
+            
+            # Club
+            ctx.fillStyle = "#5d4037"
+            ctx.fillRect(30, 15, 8, 30)
+            ctx.fillStyle = "#4e342e"
+            ctx.fillRect(28, 10, 12, 15)
+            
+            ctx.restore()
+
+        def draw_bat(ctx, x, y, facing_left):
+            ctx.save()
+            ctx.translate(x, y)
+            if facing_left:
+                ctx.scale(-1, 1)
+                ctx.translate(-30, 0)
+                
+            time = window.performance.now()
+            flap_offset = math.sin(time / 100.0) * 10
+            
+            # Body
+            ctx.fillStyle = "#333"
+            ctx.beginPath()
+            ctx.arc(15, 10, 8, 0, math.pi*2)
+            ctx.fill()
+            
+            # Ears
+            ctx.beginPath()
+            ctx.moveTo(10, 5)
+            ctx.lineTo(5, -5)
+            ctx.lineTo(15, 2)
+            ctx.fill()
+            
+            ctx.beginPath()
+            ctx.moveTo(20, 5)
+            ctx.lineTo(25, -5)
+            ctx.lineTo(15, 2)
+            ctx.fill()
+            
+            # Eyes
+            ctx.fillStyle = "#ff0000"
+            ctx.fillRect(11, 8, 3, 3)
+            ctx.fillRect(17, 8, 3, 3)
+            
+            # Wings
+            ctx.fillStyle = "#222"
+            ctx.beginPath()
+            ctx.moveTo(15, 10)
+            ctx.lineTo(-5, 0 + flap_offset)
+            ctx.lineTo(-10, 15 + flap_offset)
+            ctx.lineTo(5, 15)
+            ctx.fill()
+            
+            ctx.beginPath()
+            ctx.moveTo(15, 10)
+            ctx.lineTo(35, 0 + flap_offset)
+            ctx.lineTo(40, 15 + flap_offset)
+            ctx.lineTo(25, 15)
+            ctx.fill()
+            
+            ctx.restore()
+
+        def draw_golem(ctx, x, y, facing_left):
+            ctx.save()
+            ctx.translate(x, y)
+            if facing_left:
+                ctx.scale(-1, 1)
+                ctx.translate(-60, 0)
+            
+            # Body
+            ctx.fillStyle = "#607d8b"
+            ctx.fillRect(10, 30, 40, 50)
+            
+            # Head
+            ctx.fillStyle = "#546e7a"
+            ctx.fillRect(20, 10, 20, 20)
+            
+            # Eye
+            ctx.fillStyle = "#ffeb3b"
+            ctx.fillRect(24, 16, 12, 6)
+            
+            # Arms
+            ctx.fillStyle = "#455a64"
+            ctx.fillRect(-10, 30, 20, 40)
+            ctx.fillRect(50, 30, 20, 40)
+            
+            ctx.restore()
+
         # Entities
         class Projectile:
-            def __init__(self, x, y, target_x, target_y, speed, damage):
+            def __init__(self, x, y, target_x, target_y, speed, damage, color="#00e5ff", size=12):
                 self.x = x
                 self.y = y
-                self.w = 12
-                self.h = 12
+                self.w = size
+                self.h = size
                 self.speed = speed
                 self.damage = damage
+                self.color = color
                 self.dead = False
                 
                 # Math for velocity based on direction vector
@@ -255,7 +365,7 @@
                 return {"x": self.x, "y": self.y, "w": self.w, "h": self.h}
                 
             def draw(self, ctx):
-                ctx.fillStyle = "#00e5ff"
+                ctx.fillStyle = self.color
                 ctx.beginPath()
                 ctx.arc(self.x - engine.camera_x + self.w/2, self.y - engine.camera_y + self.h/2, self.w/2, 0, math.pi*2)
                 ctx.fill()
@@ -363,6 +473,7 @@
                 self.health = HealthSystem(60)
                 self.state = "WANDER"
                 self.facing_left = False
+                self.contact_damage = 10
                 
                 # AI state variables
                 self.state_timer = 0
@@ -414,7 +525,7 @@
                     if self.attack_timer <= 0:
                         # Shoot lightning projectile from staff to player center
                         px = self.x - 5 if self.facing_left else self.x + 35
-                        engine.projectiles.append(Projectile(px, self.y + 12, player.x + 20, player.y + 30, 400, 20))
+                        engine.projectiles.append(Projectile(px, self.y + 12, player.x + 20, player.y + 30, 400, 20, "#00e5ff", 12))
                         self.attack_timer = 1.5 # Cooldown before next shot
                         self.facing_left = player.x < self.x
                         
@@ -443,14 +554,212 @@
                 ctx.fillStyle = "#4caf50"
                 ctx.fillRect(self.x - engine.camera_x, self.y - 12 - engine.camera_y, self.w * (self.health.hp / self.health.max_hp), 6)
 
+        class OrcEnemy:
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+                self.w = 40
+                self.h = 60
+                self.speed = 100
+                self.health = HealthSystem(80)
+                self.state = "WANDER"
+                self.facing_left = False
+                self.contact_damage = 15
+                
+                # AI state variables
+                self.state_timer = 0
+                self.target_x = x
+                self.target_y = y
+                self.attack_timer = 0
+                
+            def get_rect(self):
+                return {"x": self.x, "y": self.y, "w": self.w, "h": self.h}
+                
+            def update(self, dt, player):
+                if self.health.dead: return
+                self.health.update(dt)
+                
+                dist_to_player = distance(self.x, self.y, player.x, player.y)
+                
+                if self.attack_timer > 0: 
+                    self.attack_timer -= dt
+                
+                # AI State Machine Decision Logic
+                if dist_to_player < 150:
+                    self.state = "FLEE" # Too close, create distance
+                elif dist_to_player < 300 and self.attack_timer <= 0:
+                    self.state = "ATTACK" # Good distance, shoot!
+                elif dist_to_player < 500:
+                    self.state = "CHASE" # Player seen, pursue!
+                else:
+                    self.state = "WANDER" # Nothing going on
+                    
+                # AI Action Execution
+                if self.state == "WANDER":
+                    self.state_timer -= dt
+                    if self.state_timer <= 0:
+                        self.target_x = self.x + random.randint(-150, 150)
+                        self.target_y = self.y + random.randint(-150, 150)
+                        self.state_timer = random.uniform(1.5, 3.5)
+                    self.move_towards(self.target_x, self.target_y, dt)
+                    
+                elif self.state == "CHASE":
+                    self.move_towards(player.x, player.y, dt)
+                    
+                elif self.state == "FLEE":
+                    # Move exactly opposite to the player's vector
+                    tx = self.x + (self.x - player.x)
+                    ty = self.y + (self.y - player.y)
+                    self.move_towards(tx, ty, dt)
+                    
+                elif self.state == "ATTACK":
+                    if self.attack_timer <= 0:
+                        # Shoot red projectile
+                        px = self.x - 5 if self.facing_left else self.x + 35
+                        engine.projectiles.append(Projectile(px, self.y + 12, player.x + 20, player.y + 30, 300, 25, "#ff3300", 12))
+                        self.attack_timer = 2.0 # Cooldown before next shot
+                        self.facing_left = player.x < self.x
+                        
+                # Clamp to map bounds
+                self.x = max(0, min(self.x, MAP_WIDTH - self.w))
+                self.y = max(0, min(self.y, MAP_HEIGHT - self.h))
+                        
+            def move_towards(self, tx, ty, dt):
+                dist = distance(self.x, self.y, tx, ty)
+                if dist > 5:
+                    self.x += ((tx - self.x) / dist) * self.speed * dt
+                    self.y += ((ty - self.y) / dist) * self.speed * dt
+                    # Turn around depending on movement direction
+                    self.facing_left = tx < self.x
+
+            def draw(self, ctx):
+                if self.health.dead: return
+                if self.health.invulnerable_timer > 0 and (int(window.performance.now() / 100) % 2 == 0):
+                    return 
+                    
+                draw_orc(ctx, self.x - engine.camera_x, self.y - engine.camera_y, self.facing_left)
+                
+                # Floating Healthbar
+                ctx.fillStyle = "#333"
+                ctx.fillRect(self.x - engine.camera_x, self.y - 12 - engine.camera_y, self.w, 6)
+                ctx.fillStyle = "#4caf50"
+                ctx.fillRect(self.x - engine.camera_x, self.y - 12 - engine.camera_y, self.w * (self.health.hp / self.health.max_hp), 6)
+
+        class BatEnemy:
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+                self.w = 30
+                self.h = 20
+                self.speed = 220
+                self.health = HealthSystem(30)
+                self.facing_left = False
+                self.contact_damage = 15
+                
+            def get_rect(self):
+                return {"x": self.x, "y": self.y, "w": self.w, "h": self.h}
+                
+            def update(self, dt, player):
+                if self.health.dead: return
+                self.health.update(dt)
+                
+                # Bats always chase the player
+                dist = distance(self.x, self.y, player.x, player.y)
+                if dist > 2:
+                    self.x += ((player.x - self.x) / dist) * self.speed * dt
+                    self.y += ((player.y - self.y) / dist) * self.speed * dt
+                    self.facing_left = player.x < self.x
+
+                self.x = max(0, min(self.x, MAP_WIDTH - self.w))
+                self.y = max(0, min(self.y, MAP_HEIGHT - self.h))
+
+            def draw(self, ctx):
+                if self.health.dead: return
+                if self.health.invulnerable_timer > 0 and (int(window.performance.now() / 100) % 2 == 0):
+                    return 
+                draw_bat(ctx, self.x - engine.camera_x, self.y - engine.camera_y, self.facing_left)
+                # Healthbar
+                ctx.fillStyle = "#333"
+                ctx.fillRect(self.x - engine.camera_x, self.y - 12 - engine.camera_y, self.w, 4)
+                ctx.fillStyle = "#4caf50"
+                ctx.fillRect(self.x - engine.camera_x, self.y - 12 - engine.camera_y, self.w * (self.health.hp / self.health.max_hp), 4)
+
+        class GolemEnemy:
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+                self.w = 60
+                self.h = 80
+                self.speed = 60
+                self.health = HealthSystem(200)
+                self.facing_left = False
+                self.contact_damage = 25
+                self.attack_timer = 0
+                
+            def get_rect(self):
+                return {"x": self.x, "y": self.y, "w": self.w, "h": self.h}
+                
+            def update(self, dt, player):
+                if self.health.dead: return
+                self.health.update(dt)
+                
+                if self.attack_timer > 0:
+                    self.attack_timer -= dt
+
+                dist = distance(self.x, self.y, player.x, player.y)
+                
+                if dist < 400 and self.attack_timer <= 0:
+                    # Throw rock
+                    px = self.x - 10 if self.facing_left else self.x + 60
+                    engine.projectiles.append(Projectile(px, self.y + 40, player.x + 20, player.y + 30, 150, 40, "#757575", 24))
+                    self.attack_timer = 3.5
+                    self.facing_left = player.x < self.x
+                elif dist > 5:
+                    self.x += ((player.x - self.x) / dist) * self.speed * dt
+                    self.y += ((player.y - self.y) / dist) * self.speed * dt
+                    self.facing_left = player.x < self.x
+
+                self.x = max(0, min(self.x, MAP_WIDTH - self.w))
+                self.y = max(0, min(self.y, MAP_HEIGHT - self.h))
+
+            def draw(self, ctx):
+                if self.health.dead: return
+                if self.health.invulnerable_timer > 0 and (int(window.performance.now() / 100) % 2 == 0):
+                    return 
+                draw_golem(ctx, self.x - engine.camera_x, self.y - engine.camera_y, self.facing_left)
+                # Healthbar
+                ctx.fillStyle = "#333"
+                ctx.fillRect(self.x - engine.camera_x, self.y - 12 - engine.camera_y, self.w, 6)
+                ctx.fillStyle = "#4caf50"
+                ctx.fillRect(self.x - engine.camera_x, self.y - 12 - engine.camera_y, self.w * (self.health.hp / self.health.max_hp), 6)
+
+        def spawn_random_enemy(x, y):
+            r = random.random()
+            if r < 0.3:
+                return WizardEnemy(x, y)
+            elif r < 0.6:
+                return OrcEnemy(x, y)
+            elif r < 0.85:
+                return BatEnemy(x, y)
+            else:
+                return GolemEnemy(x, y)
+
 
         # Initialization
         player = SkeletonPlayer(MAP_WIDTH / 2, MAP_HEIGHT / 2)
 
-        # Spawn initial batch of wizards
-        MAX_ENEMIES = 15
+        # Generate some visual walls
+        for _ in range(50):
+            wx = random.randint(0, MAP_WIDTH - 100)
+            wy = random.randint(0, MAP_HEIGHT - 100)
+            ww = random.randint(50, 200)
+            wh = random.randint(50, 200)
+            engine.walls.append({"x": wx, "y": wy, "w": ww, "h": wh})
+
+        # Spawn initial batch of enemies
+        MAX_ENEMIES = 20
         for _ in range(MAX_ENEMIES):
-            engine.enemies.append(WizardEnemy(random.randint(0, MAP_WIDTH), random.randint(0, MAP_HEIGHT)))
+            engine.enemies.append(spawn_random_enemy(random.randint(0, MAP_WIDTH), random.randint(0, MAP_HEIGHT)))
 
         # Game Loop Process
         async def main():
@@ -491,6 +800,11 @@
                         player.health.take_damage(p.damage)
                         p.dead = True
                         
+                # Contact Damage (Enemies vs Player)
+                for e in engine.enemies:
+                    if not e.health.dead and rect_intersect(e.get_rect(), p_rect):
+                        player.health.take_damage(getattr(e, 'contact_damage', 10))
+                        
                 # Update Enemies
                 alive_enemies = 0
                 for e in engine.enemies:
@@ -509,7 +823,7 @@
                         ey = player.y + math.sin(angle) * dist
                         # Keep inside map
                         if 0 <= ex <= MAP_WIDTH and 0 <= ey <= MAP_HEIGHT:
-                            engine.enemies.append(WizardEnemy(ex, ey))
+                            engine.enemies.append(spawn_random_enemy(ex, ey))
                         respawn_timer = 2.0
 
                 # Garbage collection for dead enemies
@@ -543,6 +857,14 @@
                 ctx.strokeStyle = "#ff0000"
                 ctx.lineWidth = 10
                 ctx.strokeRect(-engine.camera_x, -engine.camera_y, MAP_WIDTH, MAP_HEIGHT)
+
+                # Draw walls
+                ctx.fillStyle = "#444"
+                ctx.strokeStyle = "#222"
+                ctx.lineWidth = 4
+                for w in engine.walls:
+                    ctx.fillRect(w["x"] - engine.camera_x, w["y"] - engine.camera_y, w["w"], w["h"])
+                    ctx.strokeRect(w["x"] - engine.camera_x, w["y"] - engine.camera_y, w["w"], w["h"])
 
                 # Draw entities in z-order
                 for e in engine.enemies: e.draw(ctx)
